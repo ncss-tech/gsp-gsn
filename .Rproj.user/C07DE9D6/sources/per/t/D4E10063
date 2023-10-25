@@ -1,0 +1,28 @@
+{
+    "id": "D4E10063",
+    "path": null,
+    "project_path": null,
+    "type": "object_explorer",
+    "hash": "0",
+    "contents": "",
+    "dirty": false,
+    "created": 1697833353454.0,
+    "source_on_save": false,
+    "relative_order": 6,
+    "properties": {
+        "id": "f51ae66435dd4f6f9ecfefe27db95d54",
+        "name": "scd_l",
+        "title": "scd_l",
+        "language": "R",
+        "source_window_id": "",
+        "Source": "Source"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1741827596816,
+    "encoding": "",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1697833353454,
+    "read_only": false,
+    "read_only_alternatives": []
+}
