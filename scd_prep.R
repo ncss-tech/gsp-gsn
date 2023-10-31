@@ -3,90 +3,88 @@ library(dplyr)
 library(sf)
 
 
-# load snapshot ----
+# load snapshots ----
 fp <- "C:/Users/stephen.roecker/OneDrive - USDA/data/scd"
 scd_l <- readRDS(file = paste0(fp, "/ncss-scd_sda_20230808.rds"))
+# scd_l2 <- readRDS(file = file.path(fp, "ncss_labdata.rds"))
+f <- readRDS(file = "C:/Users/stephen.roecker/Box/nasis-pedons/fetchNASIS_spc_20230926.rds")
 
 
 
 # metadata
 dm <- dm::dm_from_src(soilDB:::.openNASISchannel(), learn_keys = TRUE)
-dm$system |> collect() |> subset(sysver == "Lab SDA Data Mart 1.0") |> as.data.frame()
-md <- dm$attribute |> collect() |> 
+dm$system |> 
+  dm::collect() |> 
+  subset(sysver == "Lab SDA Data Mart 1.0") |> 
+  as.data.frame()
+md <- dm$attribute |> dm::collect() |> 
   subset(sysiidref == 41045) |>
   merge(
-    dm$uom |> collect() |> subset(select = c(uomiid, uomsym)), 
+    dm$uom |> dm::collect() |> subset(select = c(uomiid, uomsym)), 
     by.x = "uomiidref", by.y = "uomiid", all.x = TRUE, sort = FALSE
     )
 md <- md[c(ncol(md), 1:(ncol(md) - 1))]
 
 
 
-# evaluate ----
-test <- scd_l$chemical_properties %>%
-  filter(!is.na(total_nitrogen_ncs)) %>%
-  inner_join(scd_l$layer, by = "labsampnum") %>%
-  inner_join(scd_l$combine_nasis_ncss, by = "pedon_key")
-test2 <- test %>% 
-  group_by(pedon_key) %>% 
-  summarize(n_N = sum(!is.na(total_nitrogen_ncs)) > 0) %>%
-  inner_join(scd_l$combine_nasis_ncss, by = "pedon_key") %>%
-  select(pedon_key, n_N, samp_year, corr_year, SSL_year, site_year)
-
-
-
 # convert dates ----
+s <- f@site
+anyDuplicated(paste(s$peiid, s$obsdate))
+
+s <- within(s, {
+  peiid   = as.integer(peiid)
+  obsdate = as.Date(obsdate, "%Y-%m-%d")
+  obsyear = format(obsdate, "%Y") |> as.integer()
+})
+
+scd_l$combine_nasis_ncss <- merge(
+  scd_l$combine_nasis_ncss, 
+  s[c("peiid", "obsdate", "obsyear")],
+  by.x = "pedoniid", by.y = "peiid",
+  all.x = TRUE,
+  sort = FALSE
+)
+
+
 scd_l$combine_nasis_ncss <- within(scd_l$combine_nasis_ncss, {
   samp_classdate2 = strptime(samp_classdate, "%e/%m/%Y %H:%M:%S %p")
   corr_classdate2 = strptime(corr_classdate, "%e/%m/%Y %H:%M:%S %p")
   SSL_classdate2  = strptime(SSL_classdate,  "%e/%m/%Y %H:%M:%S %p")
   site_obsdate2   = strptime(site_obsdate,   "%e/%m/%Y %H:%M:%S %p")
   
-  samp_year = format(samp_classdate2, "%Y")
-  corr_year = format(corr_classdate2, "%Y")
-  SSL_year  = format(SSL_classdate2,  "%Y")
-  site_year = format(samp_classdate2, "%Y")
+  samp_year = format(samp_classdate2, "%Y") |> as.integer()
+  corr_year = format(corr_classdate2, "%Y") |> as.integer()
+  SSL_year  = format(SSL_classdate2,  "%Y") |> as.integer()
+  year      = apply(cbind(samp_year, corr_year, SSL_year), 1, min, na.rm = TRUE)
+  year      = ifelse(is.na(obsyear), year, obsyear)
 })
 
 
 
-# extract variables ----
-vars <- c("layer", "physical_properties", "chemical_properties", "")
-sapply(scd_l[vars], function(x) sum(duplicated(x$labsampnum), na.rm = TRUE))
-
-
-pat <- c("total_nitrogen|^phosphorus_|^new_zealand_phos|^potassium_|^cec|ph_h2o|ph_cacl2|ph_kcl|total_carbon|organic_carbon")
-nms  <- names(scd_l$chemical_properties)
-vars <- nms[grep(pat, nms)]
-gsn_df <- scd_l$layer |>
-  merge(scd_l$physical_properties, by = "labsampnum", all.x = TRUE, sort = FALSE) |>
-  merge(scd_l$chemical_properties[c(1:3, match(vars, nms))], 
-                                   by = "labsampnum", all.x = TRUE, sort = FALSE)
-
-
-# uncode method codes ----
-idx <- grep("method", names(gsn_df))
-test <- lapply(idx, function(x) {
-  factor(gsn_df[[x]], levels = scd_l$method_code$proced_code, labels = scd_l$method_code$proced_name) |> droplevels()
-}) |> as.data.frame()
-names(test) <- paste0(names(gsn_df)[idx], "_desc")
-gsn_df <- cbind(gsn_df, test)
-
-
-
-# remove duplicates ----
-
-
 # coordinates ----
+nm <- names(scd_l$site) 
+idx <- which(grepl("longitude|latitude", nm))
+names(scd_l$site)[idx[9:10]] <- c("lon_dd", "lat_dd")
+table(dms = complete.cases(scd_l$site[idx[1:8]]), dd = complete.cases(scd_l$site[idx[8:9]]))
 
-scd_sf <- subset(scd_l$site, complete.cases(longitude_std_decimal_degrees, latitude_std_decimal_degrees))
+scd_l$site <- within(scd_l$site, {
+  horizontal_datum_name = sub("old hawaiian",                 "GRS80",  horizontal_datum_name)
+  horizontal_datum_name = sub("Guam1963",                     "clrk66", horizontal_datum_name)
+  horizontal_datum_name = sub("North American Datum of 1927", "NAD27",  horizontal_datum_name)
+  horizontal_datum_name = sub("North American Datum of 1983", "NAD83",  horizontal_datum_name)
+  horizontal_datum_name = sub("World Geodetic System 1984",   "WGS84",  horizontal_datum_name)
+})
+table(scd_l$site$horizontal_datum_name)
+
+
+scd_sf <- subset(scd_l$site, complete.cases(lon_dd, lat_dd))
 scd_sf <- st_as_sf(
   scd_sf,
-  coords = c("longitude_std_decimal_degrees", "latitude_std_decimal_degrees")
-  # crs = 4326
+  coords = c("lon_dd", "lat_dd"),
+  crs = 4326
 )
-st_crs(scd_sf) <- 4326
 st_bbox(scd_sf)  
+
 
 
 # intersect with the GADM reference
@@ -103,7 +101,87 @@ table(USA = scd_sf$GID_0 == "USA", Count = !is.na(scd_sf$site_key), useNA = "alw
 
 
 
-# nitrogen ----
+# remove duplicates ----
+vars <- c("layer", "physical_properties", "chemical_properties", "")
+sapply(scd_l[vars], function(x) sum(duplicated(x$labsampnum), na.rm = TRUE))
+
+aggregate(siteiid ~ site_key, data = scd_l$combine_nasis_ncss, length) |> summary()
+aggregate(pedoniid ~ pedon_key, data = scd_l$combine_nasis_ncss, length) |> summary()
+aggregate(pedon_key ~ site_key, data = scd_l$combine_nasis_ncss, length) |> summary()
+aggregate(pedlabsampnum ~ pedon_key, data = scd_l$combine_nasis_ncss, length) |> summary()
+
+
+
+
+
+# extract variables ----
+
+pat_phys <- c("^sand|^silt|^clay|^texture|^particle_size|frag|bulk_density_third")
+nms_phys  <- names(scd_l$physical_properties)
+vars_phys <- nms_phys[
+  grepl(pat_phys, nms_phys) 
+  & !grepl("disp", nms_phys)
+  ]
+
+pat_chem <- c("total_nitrogen|^phosphorus_|^new_zealand_phos|^potassium_|^cec_nh4|ph_h2o|ph_cacl2|ph_kcl|total_carbon|organic_carbon|caco3_lt_2")
+nms_chem  <- names(scd_l$chemical_properties)
+vars_chem <- nms_chem[
+  grepl(pat_chem, nms_chem) 
+  & !grepl("disp", nms_chem)
+  ]
+
+gsn_df <- scd_l$layer |>
+  merge(scd_l$physical_properties[c(1:3, match(vars_phys, nms_phys))], by = "labsampnum", all.x = TRUE, sort = FALSE) |>
+  merge(scd_l$chemical_properties[c(1:3, match(vars_chem, nms_chem))], 
+                                   by = "labsampnum", all.x = TRUE, sort = FALSE)
+
+
+## uncode method codes ----
+idx <- grep("method", names(gsn_df))
+test <- lapply(idx, function(x) {
+  factor(gsn_df[[x]], 
+         levels = scd_l$method_code$proced_code, 
+         labels = scd_l$method_code$proced_name) |> 
+    droplevels()
+}) |> 
+  as.data.frame()
+names(test) <- paste0(names(gsn_df)[idx], "_desc")
+gsn_df <- cbind(gsn_df, test)
+
+
+
+## summarize ----
+test <- scd_l$chemical_properties %>%
+  filter(!is.na(total_nitrogen_ncs)) %>%
+  inner_join(scd_l$layer, by = "labsampnum") %>%
+  inner_join(scd_l$combine_nasis_ncss, by = "pedon_key")
+test2 <- test %>% 
+  group_by(pedon_key) %>% 
+  summarize(n_N = sum(!is.na(total_nitrogen_ncs)) > 0) %>%
+  inner_join(scd_l$combine_nasis_ncss, by = "pedon_key") %>%
+  select(pedon_key, n_N, samp_year, corr_year, SSL_year, site_year)
+
+
+# tally the number of pedon per decade with 1 or more measurements for each soil property
+test <- as.data.table(gsn_df)
+vars <- c(vars_phys, vars_chem)
+vars <- vars[!grepl("method", vars)]
+test <- test[, lapply(.SD, function(x) any(!is.na(x))), .SDcols = vars, by = c("site_key", "pedon_key")]
+vars <- c("site_key", "pedon_key", "year")
+test <- merge(scd_l$combine_nasis_ncss[vars], test, by = vars[1:2], all.x = TRUE, sort = FALSE)
+test$decade <- substr(test$year, 1, 3) |> as.integer() * 10L
+test2 <- aggregate(. ~ decade, data = test[- c(1:3)], sum, na.rm = TRUE)|>
+  t() |>
+  as.data.frame()
+names(test2) <- as.character(test2[1, ])
+test2 <- test2[-1, ]
+test2 <- cbind(var = row.names(test2), test2)
+row.names(test2) <- NULL
+View(test2)
+
+
+
+## nitrogen ----
 nm  <- names(gsn_df)
 idx <- which(grepl("nitrogen", nm) & !grepl("method", nm))
 summary(gsn_df[idx])
@@ -114,7 +192,7 @@ aggregate(total_nitrogen_ncs ~ total_nitrogen_ncs_method_desc, data = gsn_df, fu
 table(gsn_df$total_nitrogen_ncs_method_desc, gsn_df$total_nitrogen_ncs_method)
 
 
-## pedotransfer function from Tomer 2017 ----
+### pedotransfer function from Tomer 2017 ----
 gsn_df <- within(gsn_df, {
   N_pt = ifelse(
     !grepl("Kjeldahl|Unknown", total_nitrogen_ncs_method_desc), 
@@ -132,13 +210,13 @@ abline(0, 1)
 
 
 
-# phosphorus ----
+## phosphorus ----
 nm  <- names(gsn_df)
 idx <- which(grepl("phosphorus", nm) & !grepl("method", nm))
 summary(gsn_df[idx])
 
 
-# subset non-missing data
+### subset non-missing data ----
 gsn_df[idx] > 0 ->.;
 # .[rowSums(., na.rm = TRUE) > 0, ] |>
 rowSums(., na.rm = TRUE) |> 
@@ -180,7 +258,7 @@ gsn_df_P |>
   )
 
 
-## pedotransfer function for missing Bray 1 ----
+### pedotransfer function for missing Bray 1 ----
 table(gsn_df_P$phosphorus_mehlich_3 > 1000)
 filter(gsn_df_P, phosphorus_mehlich_3 < 1000) %>%
   ggplot(aes(x = phosphorus_bray1, y = phosphorus_mehlich_3)) +
