@@ -6,7 +6,7 @@ library(data.table)
 
 
 # load snapshots ----
-fp <- "C:/Users/stephen.roecker/OneDrive - USDA/data/scd"
+fp <- "C:/Users/stephen.roecker/USDA/NSSC - SBS/projects/gsp-gsn/data"
 scd_l <- readRDS(file = paste0(fp, "/ncss-scd_sda_20230808.rds"))
 # scd_l2 <- readRDS(file = file.path(fp, "ncss_labdata.rds"))
 f <- readRDS(file = "C:/Users/stephen.roecker/Box/nasis-pedons/fetchNASIS_spc_20230926.rds")
@@ -39,7 +39,7 @@ s <- within(s, {
   obsyear = format(obsdate, "%Y") |> as.integer()
 })
 
-scd_l$combine_nasis_ncss <- merge(
+scd_nasis <- merge(
   scd_l$combine_nasis_ncss, 
   s[c("peiid", "obsdate", "obsyear")],
   by.x = "pedoniid", by.y = "peiid",
@@ -48,7 +48,7 @@ scd_l$combine_nasis_ncss <- merge(
 )
 
 
-scd_l$combine_nasis_ncss <- within(scd_l$combine_nasis_ncss, {
+scd_nasis <- within(scd_nasis, {
   samp_classdate2 = strptime(samp_classdate, "%e/%m/%Y %H:%M:%S %p")
   corr_classdate2 = strptime(corr_classdate, "%e/%m/%Y %H:%M:%S %p")
   SSL_classdate2  = strptime(SSL_classdate,  "%e/%m/%Y %H:%M:%S %p")
@@ -60,6 +60,10 @@ scd_l$combine_nasis_ncss <- within(scd_l$combine_nasis_ncss, {
   year      = apply(cbind(samp_year, corr_year, SSL_year), 1, min, na.rm = TRUE)
   year      = ifelse(is.na(obsyear), year, obsyear)
 })
+
+
+# saveRDS(scd_nasis, file = "C:/Users/stephen.roecker/USDA/NSSC - SBS/projects/gsp-gsn/data/scd_nasis.rds")
+scd_nasis <- readRDS(scd_nasis, file = "C:/Users/stephen.roecker/USDA/NSSC - SBS/projects/gsp-gsn/data/scd_nasis.rds")
 
 
 
@@ -111,8 +115,9 @@ scd_s <- within(scd_s, {
 table(datum = scd_s$datum, ellps =  scd_s$ellps, useNA = "always")
 
 
+
 # estimate datum for missing
-s2 <- aggregate(year ~ site_key, data = scd_l$combine_nasis_ncss, min, na.rm = TRUE)
+s2 <- aggregate(year ~ site_key, data = scd_nasis, min, na.rm = TRUE)
 scd_s <- merge(scd_s, s2, by = "site_key", all.x = TRUE, sort = FALSE)
 
 test <- scd_s |>
@@ -123,7 +128,7 @@ test <- scd_s |>
 
 subset(test, year %in% 1920:2023) |>
   ggplot(aes(x = year, y = xy, col = datum)) +
-  geom_line(size = 1, alpha = 0.7)
+  geom_line(linewidth = 1, alpha = 0.7)
 
 
 scd_s <- within(scd_s, {
@@ -134,6 +139,7 @@ scd_s <- within(scd_s, {
   idx = NULL
 })
 table(datum = scd_s$datum, ellps =  scd_s$ellps, useNA = "always")
+
 
 
 ## convert dms to dd ----
@@ -222,42 +228,48 @@ scd_sf <- scd_sf |> cbind(st_drop_geometry(world_bndy[idx, 1:2]))
 
 table(USA = scd_sf$GID_0 == "USA", Count = !is.na(scd_sf$site_key), useNA = "always")
 
-scd_sf[names(scd_sf) %in% c("X", "Y")] <- NULL
-scd_sf <- cbind(scd_sf, st_coordinates(scd_sf))
+scd_sf[names(scd_sf) %in% c("X", "Y", "year")] <- NULL
 
-# saveRDS(scd_sf, file = "C:/Users/stephen.roecker/USDA/NSSC - SBS/projects/gsp-gsn/data/scd_sf.rds")
+# saveRDS(scd_sf, file = "C:/Users/stephen.roecker/USDA/NSSC - SBS/projects/gsp-gsn/data/scd_site_sf.rds")
 scd_sf <- readRDS(file = "C:/Users/stephen.roecker/USDA/NSSC - SBS/projects/gsp-gsn/data/scd_sf.rds")
 
 
 
 # remove duplicates ----
-scd_sf[names(scd_sf) <- c("X", "Y")] <- NULL
-scd_sf <- cbind(st_drop_geometry(scd_sf), st_coordinates(scd_sf))
-
-scd_sf <- merge(scd_sf, scd_l$combine_nasis_ncss, by = "site_key", all.y = TRUE, sort = FALSE)
-scd_sf <- subset(scd_sf, !is.na(pedlabsampnum))
-scd_sf$coords <- with(scd_sf, paste(round(X, 5), round(Y, 5)))
-scd_sf$dups <- scd_sf$coords %in% scd_sf[duplicated(scd_sf$coords), ]$coords
-scd_sf <- scd_sf[order(scd_sf$coords, scd_sf$year), ]
+scd_sf <- cbind(
+  st_drop_geometry(scd_sf), 
+  st_coordinates(scd_sf)
+  ) |>
+  merge(scd_nasis, by = "site_key", all.y = TRUE, sort = FALSE) |>
+  subset(!is.na(pedlabsampnum)) |>
+  within({
+    coords = paste(round(X, 5), round(Y, 5))
+    dups   = coords %in% coords[duplicated(coords)]
+  })
 
 sum(scd_sf$dups)
-dim(scd_sf[!duplicated(scd_sf$coords) & !duplicated(scd_sf$pedlabsampnum) & scd_sf$GID_0 == "USA", ])
+
 
 test <- aggregate(site_key ~ coords, data = scd_sf, length)
 names(test)[2] <- "n_coords"
-table(test$site_key)
+table(test$n_coords)
 
-scd_sf <- merge(scd_sf, test, by = "coords", all.x = TRUE, sort = FALSE)
-# scd_sf[1:ncol(scd_sf)] <- lapply(scd_sf, function(x) {
-#   if (inherits(x, "logical")) as.integer(x)
-#     else x
-#   })
 
-scd_sf <- subset(scd_sf, complete.cases(X, Y))
-scd_sf <- st_as_sf(scd_sf, coords = c("X", "Y"), crs = 4326)
+scd_sf <- merge(scd_sf, test, by = "coords", all.x = TRUE, sort = FALSE) |>
+  subset(complete.cases(X, Y))
+
+scd_sf <- st_as_sf(
+  scd_sf, 
+  coords = c("X", "Y"), 
+  crs = 4326
+  )
+
 dsn <- "C:/workspace2/scd_sf.sqlite"
 file.remove(dsn)
 write_sf(scd_sf, dsn)
+# saveRDS(scd_sf, file = "C:/Users/stephen.roecker/USDA/NSSC - SBS/projects/gsp-gsn/data/scd_site_nasis_sf.rds")
+scd_sf <- readRDS(file = "C:/Users/stephen.roecker/USDA/NSSC - SBS/projects/gsp-gsn/data/scd_sf.rds")
+
 
 idx <- with(scd_sf, n_coords <= 1 & (x_precision >= 4 | y_precision >= 4) & !duplicated(upedonid))
 table(substr(scd_sf$year, 1, 3) |> as.integer() * 10, idx)
@@ -268,10 +280,10 @@ table(substr(scd_sf$year, 1, 3) |> as.integer() * 10, idx)
 vars <- c("layer", "physical_properties", "chemical_properties", "")
 sapply(scd_l[vars], function(x) sum(duplicated(x$labsampnum), na.rm = TRUE))
 
-aggregate(siteiid ~ site_key, data = scd_l$combine_nasis_ncss, length) |> summary()
-aggregate(pedoniid ~ pedon_key, data = scd_l$combine_nasis_ncss, length) |> summary()
-aggregate(pedon_key ~ site_key, data = scd_l$combine_nasis_ncss, length) |> summary()
-aggregate(pedlabsampnum ~ pedon_key, data = scd_l$combine_nasis_ncss, length) |> summary()
+aggregate(siteiid ~ site_key, data = scd_nasis, length) |> summary()
+aggregate(pedoniid ~ pedon_key, data = scd_nasis, length) |> summary()
+aggregate(pedon_key ~ site_key, data = scd_nasis, length) |> summary()
+aggregate(pedlabsampnum ~ pedon_key, data = scd_nasis, length) |> summary()
 
 
 
@@ -317,11 +329,11 @@ gsn_df <- cbind(gsn_df, test)
 test <- scd_l$chemical_properties %>%
   filter(!is.na(total_nitrogen_ncs)) %>%
   inner_join(scd_l$layer, by = "labsampnum") %>%
-  inner_join(scd_l$combine_nasis_ncss, by = "pedon_key")
+  inner_join(scd_nasis, by = "pedon_key")
 test2 <- test %>% 
   group_by(pedon_key) %>% 
   summarize(n_N = sum(!is.na(total_nitrogen_ncs)) > 0) %>%
-  inner_join(scd_l$combine_nasis_ncss, by = "pedon_key") %>%
+  inner_join(scd_nasis, by = "pedon_key") %>%
   select(pedon_key, n_N, samp_year, corr_year, SSL_year, site_year)
 
 
@@ -331,7 +343,7 @@ vars <- c(vars_phys, vars_chem)
 vars <- vars[!grepl("method", vars)]
 test <- test[, lapply(.SD, function(x) any(!is.na(x))), .SDcols = vars, by = c("site_key", "pedon_key")]
 vars <- c("site_key", "pedon_key", "year")
-test <- merge(scd_l$combine_nasis_ncss[vars], test, by = vars[1:2], all.x = TRUE, sort = FALSE)
+test <- merge(scd_nasis[vars], test, by = vars[1:2], all.x = TRUE, sort = FALSE)
 test$decade <- substr(test$year, 1, 3) |> as.integer() * 10L
 test2 <- aggregate(. ~ decade, data = test[- c(1:3)], sum, na.rm = TRUE)|>
   t() |>
@@ -365,10 +377,11 @@ gsn_df <- within(gsn_df, {
   })
 
 # correlation
-with(gsn_df, cor(total_nitrogen_ncs, total_nitrogen_pt, use = "complete.obs"))
+with(gsn_df, cor(total_nitrogen_ncs, N_pt, use = "complete.obs"))
+
 
 # scatter plot
-with(gsn_df, plot(total_nitrogen_ncs, total_nitrogen_pt))
+with(gsn_df, plot(total_nitrogen_ncs, N_pt))
 abline(0, 1)
 
 
@@ -404,6 +417,7 @@ mapview::mapview(scd_sf_P)
 
 # summarize missing
 summary(gsn_df_P)
+
 
 # Bray 1 overlapping missing
 gsn_df_P |>
@@ -449,5 +463,7 @@ gsn_df <- within(gsn_df, {
   P_pt = ifelse(is.na(P_pt), predict(meh_meh_lm,  data.frame(phosphorus_mehlich3_extractable)), P_pt)
   })
 
+# saveRDS(gsn_df, file = file.path(fp, "gsn_df.rds"))
+gsn_df <- readRDS(gsn_df, file = file.path(fp, "gsn_df.rds"))
 
 
