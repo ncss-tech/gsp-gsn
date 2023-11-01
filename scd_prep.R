@@ -1,8 +1,8 @@
 
-library(data.table)
 library(sf)
-library(dplyr)
 library(ggplot2)
+library(dplyr)
+library(data.table)
 
 
 # load snapshots ----
@@ -73,10 +73,11 @@ names(scd_l$site)[idx] <- sub("latitude",  "lat", nm[idx])
 names(scd_l$site)[nm == "horizontal_datum_name"] <- "datum"
 
 nm <- names(scd_l$site) 
-idx <- which(grepl("lon_|lat_", nm))
-names(scd_l$site)[idx[9:10]] <- c("lon_dd", "lat_dd")
+var <- "std_decimal_degrees"
+idx <- which(grepl(var, nm))
+names(scd_l$site)[idx] <- gsub(var, "dd", nm[idx])
 
-table(dms = complete.cases(scd_l$site[idx[1:8]]), dd = complete.cases(scd_l$site[idx[8:9]]))
+table(dms = complete.cases(scd_l$site[3:11]), dd = complete.cases(scd_l$site[12:13]))
 
 
 ## fix datum ----
@@ -93,7 +94,15 @@ scd_l$site <- within(scd_l$site, {
   datum[datum == "WGS86"] <- "WGS84"
   
   lon_direction = tolower(lon_direction)
-  lat_direction = tolower(lon_direction)
+  lat_direction = tolower(lat_direction)
+  
+  lon_degrees = abs(lon_degrees)
+  lon_minutes = abs(lon_minutes)
+  lon_seconds = abs(lon_seconds)
+  
+  lat_degrees = abs(lat_degrees)
+  lat_minutes = abs(lat_minutes)
+  lat_seconds = abs(lat_seconds)
   
   x = (lon_degrees + lon_minutes / 60 + lon_seconds / 3600) * ifelse(lon_direction == "west",  -1, 1)
   y = (lat_degrees + lat_minutes / 60 + lat_seconds / 3600) * ifelse(lon_direction == "south", -1, 1)
@@ -119,7 +128,7 @@ subset(test, year %in% 1920:2023) |>
 scd_l$site <- within(scd_l$site, {
   idx = (is.na(datum) | datum == "") & is.na(ellps)
   datum[idx  & year <= 2012]  = "NAD83"
-  datum[idx & year >  2012] = "WGS84"
+  datum[idx & year  >   2012] = "WGS84"
   datum[is.na(datum) & is.na(ellps)] = "NAD83"
   idx = NULL
 })
@@ -151,41 +160,14 @@ s2 <- {
 }
 
 vars <- c("site_key", "X", "Y")
-scd_l$site <- merge(scd_l$site, s2[vars], by = "site_key", all.x = TRUE, sort = FALSE)
-scd_l$site <- within(scd_l$site, {
+scd_site <- merge(scd_l$site, s2[vars], by = "site_key", all.x = TRUE, sort = FALSE)
+scd_site <- within(scd_site, {
   lon_dd = ifelse(is.na(lon_dd), X, lon_dd)
   lat_dd = ifelse(is.na(lat_dd), Y, lat_dd) 
 })
 
 
-
-## project dd ----
-scd_sf <- subset(scd_l$site, complete.cases(lon_dd, lat_dd))
-scd_sf <- st_as_sf(
-  scd_sf,
-  coords = c("lon_dd", "lat_dd"),
-  crs = 4326
-)
-st_bbox(scd_sf)  
-
-
-
-# intersect with the GADM reference
-world_bndy <- geodata::world(path = getwd(), resolution = 1) |> 
-  st_as_sf() |>
-  st_make_valid()
-
-idx <- st_intersects(scd_sf, world_bndy) |> 
-  lapply(function(x) x[1]) |> 
-  unlist()
-scd_sf <- scd_sf |> cbind(st_drop_geometry(world_bndy[idx, 1:2]))
-
-table(USA = scd_sf$GID_0 == "USA", Count = !is.na(scd_sf$site_key), useNA = "always")
-
-# saveRDS(scd_sf, file = "C:/Users/stephen.roecker/USDA/NSSC - SBS/projects/gsp-gsn/data/scd_sf.rds")
-
-
-## coordinate precision
+## coordinate precision ----
 coord_precision <- function(df, digits) {
   test <- round(df, digits) == df
   apply(test, 1, all)
@@ -202,12 +184,44 @@ coord_prec2 <- function(x, y) {
   test <- cbind(
     x_precision = substr(x, x_n1 + 1, x_n2) |> nchar(), 
     y_precision = substr(y, y_n1 + 1, y_n2) |> nchar()
-    )
+  )
 }
 
 # 5 digits = ~ 1m; 4 digits .0= ~ 11m; 3 digits = ~ 111m
-{apply(coord_prec2(df[, 1], df[, 2]), 1, max) >= 3} |> summary()
+test <- coord_prec2(scd_site$lon_dd, scd_site$lat_dd)
+{apply(test, 1, max) >= 3} |> summary()
 
+scd_site <- cbind(scd_site, test)
+
+
+
+## project dd ----
+scd_sf <- subset(scd_site, complete.cases(lon_dd, lat_dd))
+# scd_sf <- subset(scd_site, complete.cases(longitude_std_decimal_degrees, latitude_std_decimal_degrees))
+scd_sf <- st_as_sf(
+  scd_sf,
+  coords = c("lon_dd", "lat_dd"),
+  # coords = c("longitude_std_decimal_degrees", "latitude_std_decimal_degrees"),
+  crs = 4326
+)
+st_bbox(scd_sf)  
+
+
+
+# intersect with the GADM reference
+world_bndy <- geodata::world(path = getwd(), resolution = 1) |> 
+  st_as_sf() |>
+  st_make_valid() |>
+  st_transform(crs = 4326)
+
+idx <- st_intersects(scd_sf, world_bndy) |> 
+  lapply(function(x) x[1]) |> 
+  unlist()
+scd_sf <- scd_sf |> cbind(st_drop_geometry(world_bndy[idx, 1:2]))
+
+table(USA = scd_sf$GID_0 == "USA", Count = !is.na(scd_sf$site_key), useNA = "always")
+
+# saveRDS(scd_sf, file = "C:/Users/stephen.roecker/USDA/NSSC - SBS/projects/gsp-gsn/data/scd_sf.rds")
 
 
 
