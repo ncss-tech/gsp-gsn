@@ -65,23 +65,24 @@ scd_l$combine_nasis_ncss <- within(scd_l$combine_nasis_ncss, {
 
 # coordinates ----
 ## rename columns ----
-nm <- names(scd_l$site) 
+scd_s <- scd_l$site
+nm <- names(scd_s) 
 idx <- grepl("longitude", nm)
-names(scd_l$site)[idx] <- sub("longitude", "lon", nm[idx])
+names(scd_s)[idx] <- sub("longitude", "lon", nm[idx])
 idx <- grepl("latitude", nm)
-names(scd_l$site)[idx] <- sub("latitude",  "lat", nm[idx])
-names(scd_l$site)[nm == "horizontal_datum_name"] <- "datum"
+names(scd_s)[idx] <- sub("latitude",  "lat", nm[idx])
+names(scd_s)[nm == "horizontal_datum_name"] <- "datum"
 
-nm <- names(scd_l$site) 
-var <- "std_decimal_degrees"
-idx <- which(grepl(var, nm))
-names(scd_l$site)[idx] <- gsub(var, "dd", nm[idx])
+# nm <- names(scd_s) 
+# var <- "std_decimal_degrees"
+# idx <- which(grepl(var, nm))
+# names(scd_s)[idx] <- gsub(var, "dd", nm[idx])
 
-table(dms = complete.cases(scd_l$site[3:11]), dd = complete.cases(scd_l$site[12:13]))
+table(dms = complete.cases(scd_s[3:11]), dd = complete.cases(scd_s[12:13]))
 
 
 ## fix datum ----
-scd_l$site <- within(scd_l$site, {
+scd_s <- within(scd_s, {
   ellps = NA
   ellps[datum == "old hawaiian"] = "GRS80"  # EPSG = 6135
   ellps[datum == "Guam1963"]     = "clrk66" # EPSG = 4675
@@ -107,14 +108,14 @@ scd_l$site <- within(scd_l$site, {
   x = (lon_degrees + lon_minutes / 60 + lon_seconds / 3600) * ifelse(lon_direction == "west",  -1, 1)
   y = (lat_degrees + lat_minutes / 60 + lat_seconds / 3600) * ifelse(lon_direction == "south", -1, 1)
 })
-table(datum = scd_l$site$datum, ellps =  scd_l$site$ellps, useNA = "always")
+table(datum = scd_s$datum, ellps =  scd_s$ellps, useNA = "always")
 
 
 # estimate datum for missing
 s2 <- aggregate(year ~ site_key, data = scd_l$combine_nasis_ncss, min, na.rm = TRUE)
-scd_l$site <- merge(scd_l$site, s2, by = "site_key", all.x = TRUE, sort = FALSE)
+scd_s <- merge(scd_s, s2, by = "site_key", all.x = TRUE, sort = FALSE)
 
-test <- scd_l$site |>
+test <- scd_s |>
   transform(xy = complete.cases(x, y),
             year = as.integer(year)
             ) |>
@@ -125,19 +126,19 @@ subset(test, year %in% 1920:2023) |>
   geom_line(size = 1, alpha = 0.7)
 
 
-scd_l$site <- within(scd_l$site, {
+scd_s <- within(scd_s, {
   idx = (is.na(datum) | datum == "") & is.na(ellps)
   datum[idx  & year <= 2012]  = "NAD83"
   datum[idx & year  >   2012] = "WGS84"
   datum[is.na(datum) & is.na(ellps)] = "NAD83"
   idx = NULL
 })
-table(datum = scd_l$site$datum, ellps =  scd_l$site$ellps, useNA = "always")
+table(datum = scd_s$datum, ellps =  scd_s$ellps, useNA = "always")
 
 
 ## convert dms to dd ----
 s2 <- {
-  split(scd_l$site, ~ paste(datum, ellps), drop = TRUE) ->.;
+  split(scd_s, ~ paste(datum, ellps), drop = TRUE) ->.;
   lapply(., function(x) {
     x2 <- subset(x, complete.cases(x, y))
     cat("converting", x2$datum[1], x2$ellps[1], "\n")
@@ -160,10 +161,10 @@ s2 <- {
 }
 
 vars <- c("site_key", "X", "Y")
-scd_site <- merge(scd_l$site, s2[vars], by = "site_key", all.x = TRUE, sort = FALSE)
+scd_site <- merge(scd_s, s2[vars], by = "site_key", all.x = TRUE, sort = FALSE)
 scd_site <- within(scd_site, {
-  lon_dd = ifelse(is.na(lon_dd), X, lon_dd)
-  lat_dd = ifelse(is.na(lat_dd), Y, lat_dd) 
+  lon_dd = ifelse(is.na(lon_std_decimal_degrees), X, lon_std_decimal_degrees)
+  lat_dd = ifelse(is.na(lat_std_decimal_degrees), Y, lat_std_decimal_degrees) 
 })
 
 
@@ -197,7 +198,7 @@ scd_site <- cbind(scd_site, test)
 
 ## project dd ----
 scd_sf <- subset(scd_site, complete.cases(lon_dd, lat_dd))
-# scd_sf <- subset(scd_site, complete.cases(longitude_std_decimal_degrees, latitude_std_decimal_degrees))
+# scd_sf <- subset(scd_site, complete.cases(lon_std_decimal_degrees, lat_std_decimal_degrees))
 scd_sf <- st_as_sf(
   scd_sf,
   coords = c("lon_dd", "lat_dd"),
@@ -221,11 +222,49 @@ scd_sf <- scd_sf |> cbind(st_drop_geometry(world_bndy[idx, 1:2]))
 
 table(USA = scd_sf$GID_0 == "USA", Count = !is.na(scd_sf$site_key), useNA = "always")
 
+scd_sf[names(scd_sf) %in% c("X", "Y")] <- NULL
+scd_sf <- cbind(scd_sf, st_coordinates(scd_sf))
+
 # saveRDS(scd_sf, file = "C:/Users/stephen.roecker/USDA/NSSC - SBS/projects/gsp-gsn/data/scd_sf.rds")
+scd_sf <- readRDS(file = "C:/Users/stephen.roecker/USDA/NSSC - SBS/projects/gsp-gsn/data/scd_sf.rds")
 
 
 
 # remove duplicates ----
+scd_sf[names(scd_sf) <- c("X", "Y")] <- NULL
+scd_sf <- cbind(st_drop_geometry(scd_sf), st_coordinates(scd_sf))
+
+scd_sf <- merge(scd_sf, scd_l$combine_nasis_ncss, by = "site_key", all.y = TRUE, sort = FALSE)
+scd_sf <- subset(scd_sf, !is.na(pedlabsampnum))
+scd_sf$coords <- with(scd_sf, paste(round(X, 5), round(Y, 5)))
+scd_sf$dups <- scd_sf$coords %in% scd_sf[duplicated(scd_sf$coords), ]$coords
+scd_sf <- scd_sf[order(scd_sf$coords, scd_sf$year), ]
+
+sum(scd_sf$dups)
+dim(scd_sf[!duplicated(scd_sf$coords) & !duplicated(scd_sf$pedlabsampnum) & scd_sf$GID_0 == "USA", ])
+
+test <- aggregate(site_key ~ coords, data = scd_sf, length)
+names(test)[2] <- "n_coords"
+table(test$site_key)
+
+scd_sf <- merge(scd_sf, test, by = "coords", all.x = TRUE, sort = FALSE)
+# scd_sf[1:ncol(scd_sf)] <- lapply(scd_sf, function(x) {
+#   if (inherits(x, "logical")) as.integer(x)
+#     else x
+#   })
+
+scd_sf <- subset(scd_sf, complete.cases(X, Y))
+scd_sf <- st_as_sf(scd_sf, coords = c("X", "Y"), crs = 4326)
+dsn <- "C:/workspace2/scd_sf.sqlite"
+file.remove(dsn)
+write_sf(scd_sf, dsn)
+
+idx <- with(scd_sf, n_coords <= 1 & (x_precision >= 4 | y_precision >= 4) & !duplicated(upedonid))
+table(substr(scd_sf$year, 1, 3) |> as.integer() * 10, idx)
+
+
+
+
 vars <- c("layer", "physical_properties", "chemical_properties", "")
 sapply(scd_l[vars], function(x) sum(duplicated(x$labsampnum), na.rm = TRUE))
 
