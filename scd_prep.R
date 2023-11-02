@@ -7,7 +7,7 @@ library(data.table)
 
 # load snapshots ----
 fp <- "C:/Users/stephen.roecker/USDA/NSSC - SBS/projects/gsp-gsn/data"
-scd_l <- readRDS(file = paste0(fp, "/ncss-scd_sda_20230808.rds"))
+scd_l <- readRDS(file = paste0(fp, "/ncss-scd_sda_20231102.rds"))
 # scd_l2 <- readRDS(file = file.path(fp, "ncss_labdata.rds"))
 f <- readRDS(file = "C:/Users/stephen.roecker/Box/nasis-pedons/fetchNASIS_spc_20230926.rds")
 
@@ -32,33 +32,32 @@ md <- md[c(ncol(md), 1:(ncol(md) - 1))]
 # convert dates ----
 s <- f@site
 anyDuplicated(paste(s$peiid, s$obsdate))
+s$peiid <- as.integer(s$peiid)
 
-s <- within(s, {
-  peiid   = as.integer(peiid)
-  obsdate = as.Date(obsdate, "%Y-%m-%d")
-  obsyear = format(obsdate, "%Y") |> as.integer()
-})
 
 scd_nasis <- merge(
   scd_l$combine_nasis_ncss, 
-  s[c("peiid", "obsdate", "obsyear")],
+  s[c("peiid", "obsdate")],
   by.x = "pedoniid", by.y = "peiid",
   all.x = TRUE,
   sort = FALSE
 )
 
 
-scd_nasis <- within(scd_nasis, {
-  samp_classdate2 = strptime(samp_classdate, "%e/%m/%Y %H:%M:%S %p")
-  corr_classdate2 = strptime(corr_classdate, "%e/%m/%Y %H:%M:%S %p")
-  SSL_classdate2  = strptime(SSL_classdate,  "%e/%m/%Y %H:%M:%S %p")
-  site_obsdate2   = strptime(site_obsdate,   "%e/%m/%Y %H:%M:%S %p")
+scd_nasis <- base::within(scd_nasis, {
+  samp_classdate2 = strptime(samp_classdate, "%m/%e/%Y %H:%M:%S %p")
+  corr_classdate2 = strptime(corr_classdate, "%m/%e/%Y %H:%M:%S %p")
+  SSL_classdate2  = strptime(SSL_classdate,  "%m/%e/%Y %H:%M:%S %p")
+  site_obsdate2   = strptime(site_obsdate,   "%m/%e/%Y %H:%M:%S %p")
+  obsdate = as.Date(obsdate, "%Y-%m-%d")
   
-  samp_year = format(samp_classdate2, "%Y") |> as.integer()
-  corr_year = format(corr_classdate2, "%Y") |> as.integer()
-  SSL_year  = format(SSL_classdate2,  "%Y") |> as.integer()
-  year      = apply(cbind(samp_year, corr_year, SSL_year), 1, min, na.rm = TRUE)
-  year      = ifelse(is.na(obsyear), year, obsyear)
+  samp_year    = format(samp_classdate2, "%Y") |> as.integer()
+  corr_year    = format(corr_classdate2, "%Y") |> as.integer()
+  SSL_year     = format(SSL_classdate2,  "%Y") |> as.integer()
+  site_obsyear = format(site_obsdate2, "%Y") |> as.integer()
+  obsyear      = format(obsdate,         "%Y") |> as.integer()
+  year         = apply(cbind(samp_year, corr_year, SSL_year, site_obsyear, obsyear), 1, min, na.rm = TRUE)
+  # year      = ifelse(is.na(obsyear), year, obsyear)
 })
 
 
@@ -110,7 +109,7 @@ scd_s <- within(scd_s, {
   lat_seconds = abs(lat_seconds)
   
   x = (lon_degrees + lon_minutes / 60 + lon_seconds / 3600) * ifelse(lon_direction == "west",  -1, 1)
-  y = (lat_degrees + lat_minutes / 60 + lat_seconds / 3600) * ifelse(lon_direction == "south", -1, 1)
+  y = (lat_degrees + lat_minutes / 60 + lat_seconds / 3600) * ifelse(lat_direction == "south", -1, 1)
 })
 table(datum = scd_s$datum, ellps =  scd_s$ellps, useNA = "always")
 
@@ -334,7 +333,7 @@ test2 <- test %>%
   group_by(pedon_key) %>% 
   summarize(n_N = sum(!is.na(total_nitrogen_ncs)) > 0) %>%
   inner_join(scd_nasis, by = "pedon_key") %>%
-  select(pedon_key, n_N, samp_year, corr_year, SSL_year, site_year)
+  select(pedon_key, n_N, samp_year, corr_year, SSL_year, year)
 
 
 # tally the number of pedon per decade with 1 or more measurements for each soil property
@@ -463,7 +462,11 @@ gsn_df <- within(gsn_df, {
   P_pt = ifelse(is.na(P_pt), predict(meh_meh_lm,  data.frame(phosphorus_mehlich3_extractable)), P_pt)
   })
 
+
 # saveRDS(gsn_df, file = file.path(fp, "gsn_df.rds"))
 gsn_df <- readRDS(gsn_df, file = file.path(fp, "gsn_df.rds"))
 
 
+
+
+#

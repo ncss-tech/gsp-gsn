@@ -111,12 +111,12 @@ scd <- by(td_col, td_col$tbs, function(x) {
 ## save outputs ----
 scd_l <- lapply(paste0(td$tbs, ".csv"), read.csv)
 names(scd_l) <- gsub("lab_", "", td$tbs)
-# saveRDS(scd_l, file = paste0(fp, "/ncss-scd_sda_20230808.rds"))
-scd_l <- readRDS(file = paste0(fp, "/ncss-scd_sda_20230808.rds"))
+# saveRDS(scd_l, file = paste0(fp, "/ncss-scd_sda_20231102.rds"))
+scd_l <- readRDS(file = paste0(fp, "/ncss-scd_sda_20231102.rds"))
 
 lapply(names(scd_l), function(x) {
   cat("writing ", x, " to .sqlite \n")
-  sf::write_sf(scd_l[[x]], dsn = paste0(fp, "/ncss-scd_sda_20230808.sqlite"), layer = x)
+  sf::write_sf(scd_l[[x]], dsn = paste0(fp, "/ncss-scd_sda_20231102.sqlite"), layer = x)
 })
 
 
