@@ -37,7 +37,7 @@ s$peiid <- as.integer(s$peiid)
 
 scd_nasis <- merge(
   scd_l$combine_nasis_ncss, 
-  s[c("peiid", "obsdate")],
+  s[c("peiid", "obsdate", "obsdatekind", "geocoordsource")],
   by.x = "pedoniid", by.y = "peiid",
   all.x = TRUE,
   sort = FALSE
@@ -230,7 +230,7 @@ table(USA = scd_sf$GID_0 == "USA", Count = !is.na(scd_sf$site_key), useNA = "alw
 scd_sf[names(scd_sf) %in% c("X", "Y", "year")] <- NULL
 
 # saveRDS(scd_sf, file = "C:/Users/stephen.roecker/USDA/NSSC - SBS/projects/gsp-gsn/data/scd_site_sf.rds")
-scd_sf <- readRDS(file = "C:/Users/stephen.roecker/USDA/NSSC - SBS/projects/gsp-gsn/data/scd_sf.rds")
+scd_sf <- readRDS(file = "C:/Users/stephen.roecker/USDA/NSSC - SBS/projects/gsp-gsn/data/scd_site_sf.rds")
 
 
 
@@ -256,6 +256,8 @@ table(test$n_coords)
 
 scd_sf <- merge(scd_sf, test, by = "coords", all.x = TRUE, sort = FALSE) |>
   subset(complete.cases(X, Y))
+table(scd_sf$n_coords, scd_sf$dups)
+
 
 scd_sf <- st_as_sf(
   scd_sf, 
