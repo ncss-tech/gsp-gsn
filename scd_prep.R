@@ -62,7 +62,7 @@ scd_nasis <- base::within(scd_nasis, {
 
 
 # saveRDS(scd_nasis, file = "C:/Users/stephen.roecker/USDA/NSSC - SBS/projects/gsp-gsn/data/scd_nasis.rds")
-scd_nasis <- readRDS(scd_nasis, file = "C:/Users/stephen.roecker/USDA/NSSC - SBS/projects/gsp-gsn/data/scd_nasis.rds")
+scd_nasis <- readRDS(file = "C:/Users/stephen.roecker/USDA/NSSC - SBS/projects/gsp-gsn/data/scd_nasis.rds")
 
 
 
@@ -193,7 +193,7 @@ coord_prec2 <- function(x, y) {
   )
 }
 
-# 5 digits = ~ 1m; 4 digits .0= ~ 11m; 3 digits = ~ 111m
+# 5 digits = ~ 1m; 4 digits = ~ 11m; 3 digits = ~ 111m
 test <- coord_prec2(scd_site$lon_dd, scd_site$lat_dd)
 {apply(test, 1, max) >= 3} |> summary()
 
@@ -231,62 +231,6 @@ scd_sf[names(scd_sf) %in% c("X", "Y", "year")] <- NULL
 
 # saveRDS(scd_sf, file = "C:/Users/stephen.roecker/USDA/NSSC - SBS/projects/gsp-gsn/data/scd_site_sf.rds")
 scd_sf <- readRDS(file = "C:/Users/stephen.roecker/USDA/NSSC - SBS/projects/gsp-gsn/data/scd_site_sf.rds")
-
-
-
-# remove duplicates ----
-scd_sf <- cbind(
-  st_drop_geometry(scd_sf), 
-  st_coordinates(scd_sf)
-  ) |>
-  merge(scd_nasis, by = "site_key", all.y = TRUE, sort = FALSE) |>
-  subset(!is.na(pedlabsampnum)) |>
-  within({
-    coords = paste(round(X, 5), round(Y, 5))
-    dups   = coords %in% coords[duplicated(coords)]
-  })
-
-sum(scd_sf$dups)
-
-
-test <- aggregate(site_key ~ coords, data = scd_sf, length)
-names(test)[2] <- "n_coords"
-table(test$n_coords)
-
-
-scd_sf <- merge(scd_sf, test, by = "coords", all.x = TRUE, sort = FALSE) |>
-  subset(complete.cases(X, Y))
-table(scd_sf$n_coords, scd_sf$dups)
-
-
-scd_sf <- st_as_sf(
-  scd_sf, 
-  coords = c("X", "Y"), 
-  crs = 4326
-  )
-
-dsn <- "C:/workspace2/scd_sf.sqlite"
-file.remove(dsn)
-write_sf(scd_sf, dsn)
-# saveRDS(scd_sf, file = "C:/Users/stephen.roecker/USDA/NSSC - SBS/projects/gsp-gsn/data/scd_site_nasis_sf.rds")
-scd_sf <- readRDS(file = "C:/Users/stephen.roecker/USDA/NSSC - SBS/projects/gsp-gsn/data/scd_sf.rds")
-
-
-idx <- with(scd_sf, n_coords <= 1 & (x_precision >= 4 | y_precision >= 4) & !duplicated(upedonid))
-table(substr(scd_sf$year, 1, 3) |> as.integer() * 10, idx)
-
-
-
-
-vars <- c("layer", "physical_properties", "chemical_properties", "")
-sapply(scd_l[vars], function(x) sum(duplicated(x$labsampnum), na.rm = TRUE))
-
-aggregate(siteiid ~ site_key, data = scd_nasis, length) |> summary()
-aggregate(pedoniid ~ pedon_key, data = scd_nasis, length) |> summary()
-aggregate(pedon_key ~ site_key, data = scd_nasis, length) |> summary()
-aggregate(pedlabsampnum ~ pedon_key, data = scd_nasis, length) |> summary()
-
-
 
 
 
@@ -466,9 +410,84 @@ gsn_df <- within(gsn_df, {
 
 
 # saveRDS(gsn_df, file = file.path(fp, "gsn_df.rds"))
-gsn_df <- readRDS(gsn_df, file = file.path(fp, "gsn_df.rds"))
+gsn_df <- readRDS(file = file.path(fp, "gsn_df.rds"))
+
+
+
+# remove duplicates ----
+scd_nasis <- readRDS(file = "C:/Users/stephen.roecker/USDA/NSSC - SBS/projects/gsp-gsn/data/scd_nasis.rds")
+scd_sf <- readRDS(file = "C:/Users/stephen.roecker/USDA/NSSC - SBS/projects/gsp-gsn/data/scd_site_sf.rds")
+
+
+scd_sf <- cbind(
+  st_drop_geometry(scd_sf), 
+  st_coordinates(scd_sf)
+  ) |>
+  merge(scd_nasis, by = "site_key", all.y = TRUE, sort = FALSE) |>
+  within({
+    coords = paste(round(X, 5), round(Y, 5))
+    dups   = coords %in% coords[duplicated(coords)]
+  }) |>
+  # why does LDM have sites with no pedlabsampnum?
+  subset(!is.na(pedlabsampnum))
+  
+
+sum(scd_sf$dups)
+
+
+# test2 <- aggregate(site_key ~ coords, data = scd_sf, length)
+# names(test2)[2] <- "n_coords"
+test <- as.data.table(scd_sf)[, 
+  .(n_coords = .N,
+    n_year = names(sort(table(year), decreasing = TRUE))[1]
+    ),
+  by = "coords"
+  ]
+table(test$n_coords)
+sum(test$n_coords)
+
+
+scd_sf <- merge(scd_sf, test, by = "coords", all.x = TRUE, sort = FALSE) |>
+  subset(complete.cases(X, Y))
+
+
+scd_sf <- st_as_sf(
+  scd_sf, 
+  coords = c("X", "Y"), 
+  crs = 4326
+)
+
+
+scd_sf$valid_xy <- with(
+  scd_sf, 
+  n_coords <= 5 
+  & (x_precision >= 4 | y_precision >= 4)
+  # & !(n_coords > 1 & geocoordsource %in% c("estimated from other source", "unknown") & (x_precision >= 6 | y_precision >= 6))
+  & !(n_coords > 1 & year != n_year)
+  # & in the same transect
+  )
+table(scd_sf$valid_xy)
+table(substr(scd_sf$year, 1, 3) |> as.integer() * 10, scd_sf$valid_xy)
+table(as.integer(substr(scd_sf$year, 1, 3)) * 10, scd_sf$n_coords)
+View(scd_sf[idx, c("coords", "user_site_id", "pedlabsampnum", "n_coords", "year", "valid_xy")])
+
+
+dsn <- file.path(fp, "scd_sf.sqlite")
+file.remove(dsn)
+write_sf(scd_sf, dsn)
+# saveRDS(scd_sf, file = file.path(fp, "scd_site_nasis_sf.rds"))
+scd_sf <- readRDS(file = "C:/Users/stephen.roecker/USDA/NSSC - SBS/projects/gsp-gsn/data/scd_site_sf.rds")
+
+
+
+vars <- c("layer", "physical_properties", "chemical_properties", "")
+sapply(scd_l[vars], function(x) sum(duplicated(x$labsampnum), na.rm = TRUE))
+
+aggregate(siteiid ~ site_key, data = scd_nasis, length) |> summary()
+aggregate(pedoniid ~ pedon_key, data = scd_nasis, length) |> summary()
+aggregate(pedon_key ~ site_key, data = scd_nasis, length) |> summary()
+aggregate(pedlabsampnum ~ pedon_key, data = scd_nasis, length) |> summary()
 
 
 
 
-#
