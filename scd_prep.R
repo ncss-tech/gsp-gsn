@@ -490,4 +490,66 @@ aggregate(pedlabsampnum ~ pedon_key, data = scd_nasis, length) |> summary()
 
 
 
+# check horizon depths ----
+source("C:/workspace2/github/ncss-tech/gsp-bs/validate.R")
+test <- validate_depths(gsn_df, id = "pedon_key", top = "hzn_top", bot = "hzn_bot")
+# test <- aqp::checkHzDepthLogic(gsn_df, hzdepths = c("hzn_top", "hzn_bot"), idname = "pedon_key", byhz = TRUE)
+
+gsn_df2 <- gsn_df
+
+
+# bad O horizons
+aggregate(total_carbon_ncs ~ grepl("O", hzn_desgn), data = gsn_df2, quantile, probs = seq(0, 1, 0.1))
+
+idx  <- with(gsn_df2, hzn_top > hzn_bot & (grepl("O", hzn_desgn) | (is.na(hzn_desgn) & total_carbon_ncs > 10)))
+summary(idx)
+
+vars <- c("hzn_top", "hzn_bot")
+gsn_df2[vars] <- gsn_df[vars] * ifelse(idx, -1, 1)
+summary(gsn_df2[vars])                       
+  
+  
+idx_bad_o <- gsn_df2[idx, ]$pedon_key |> unique()
+
+h2_bad_o_fixed <- gsn_df2 %>%
+  filter(pedon_key %in% idx_bad_o) |>
+  arrange(pedon_key, hzn_top) |>
+  mutate(thk = abs(hzn_bot - hzn_top)) |>
+  group_by(pedon_key) |>
+  mutate(hzn_top = c(0, cumsum(thk)[-length(thk)]),
+         hzn_bot = cumsum(thk)
+  ) |>
+  ungroup() |>
+  mutate(thk = NULL)
+
+h2_good_o <- gsn_df2[! gsn_df2$pedon_key %in% idx_bad_o, ]
+
+gsn_df2 <- rbind(h2_good_o, h2_bad_o_fixed)
+
+test2 <- validate_depths(gsn_df2, id = "pedon_key", top = "hzn_top", bot = "hzn_bot")
+# test2 <- aqp::checkHzDepthLogic(gsn_df2, hzdepths = c("hzn_top", "hzn_bot"), idname = "pedon_key", byhz = TRUE)
+
+
+# # bad bottom depths
+# h2_bad_bot_dep_fixed <- gsn_df2 |>
+#   group_by(pedon_key) |>
+#   filter(
+#     (is.na(hzn_bot) | max(hzn_top) == max(hzn_bot)) 
+#     & hzn_top == max(hzn_top)) |> 
+#   ungroup() |>
+#   mutate(hzn_bot = hzn_top + 1)
+# 
+# h2_good_bot_dep <- gsn_df2[! gsn_df$layer_key %in% h2_bad_bot_dep_fixed$layer_key, ]
+# 
+# gsn_df3 <- rbind(h2_good_bot_dep, h2_bad_bot_dep_fixed)
+# 
+# test3 <- aqp::checkHzDepthLogic(gsn_df3, hzdepths = c("hzn_top", "hzn_bot"), idname = "pedon_key", byhz = TRUE)
+
+  
+  
+  
+  
+
+
+
 
