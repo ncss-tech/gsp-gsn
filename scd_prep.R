@@ -7,9 +7,9 @@ library(data.table)
 
 # load snapshots ----
 fp <- "C:/Users/stephen.roecker/USDA/NSSC - SBS/projects/gsp-gsn/data"
-scd_l <- readRDS(file = paste0(fp, "/ncss-scd_sda_20231102.rds"))
+scd_l <- readRDS(file.path(fp, "ncss-scd_sda_20231102.rds"))
 # scd_l2 <- readRDS(file = file.path(fp, "ncss_labdata.rds"))
-f <- readRDS(file = "C:/Users/stephen.roecker/Box/nasis-pedons/fetchNASIS_spc_20230926.rds")
+f <- readRDS(file.path(fp, "fetchNASIS_spc_20230926.rds"))
 
 
 
@@ -44,6 +44,7 @@ scd_nasis <- merge(
 )
 
 
+
 scd_nasis <- base::within(scd_nasis, {
   samp_classdate2 = strptime(samp_classdate, "%m/%e/%Y %H:%M:%S %p")
   corr_classdate2 = strptime(corr_classdate, "%m/%e/%Y %H:%M:%S %p")
@@ -57,6 +58,9 @@ scd_nasis <- base::within(scd_nasis, {
   site_obsyear = format(site_obsdate2, "%Y") |> as.integer()
   obsyear      = format(obsdate,         "%Y") |> as.integer()
   year         = apply(cbind(samp_year, corr_year, SSL_year, site_obsyear, obsyear), 1, min, na.rm = TRUE)
+  year         = ifelse(is.infinite(year), as.integer(substr(upedonid, 2, 5)), year)
+  year         = ifelse(is.na(year),       as.integer(substr(usiteid,  2, 5)), year)
+  year         = ifelse(is.na(year),       as.integer(substr(pedlabsampnum, 1, 2)) + 2000L, year)
   # year      = ifelse(is.na(obsyear), year, obsyear)
 })
 
@@ -411,6 +415,7 @@ gsn_df <- within(gsn_df, {
 
 # saveRDS(gsn_df, file = file.path(fp, "gsn_df.rds"))
 gsn_df <- readRDS(file = file.path(fp, "gsn_df.rds"))
+# load(file = file.path(fp, "gsn_df.RData"))
 
 
 
@@ -472,11 +477,11 @@ table(as.integer(substr(scd_sf$year, 1, 3)) * 10, scd_sf$n_coords)
 View(scd_sf[idx, c("coords", "user_site_id", "pedlabsampnum", "n_coords", "year", "valid_xy")])
 
 
-dsn <- file.path(fp, "scd_sf.sqlite")
+dsn <- file.path(fp, "scd_site_nasis_sf.sqlite")
 file.remove(dsn)
 write_sf(scd_sf, dsn)
 # saveRDS(scd_sf, file = file.path(fp, "scd_site_nasis_sf.rds"))
-scd_sf <- readRDS(file = "C:/Users/stephen.roecker/USDA/NSSC - SBS/projects/gsp-gsn/data/scd_site_sf.rds")
+scd_sf <- readRDS(file = "C:/Users/stephen.roecker/USDA/NSSC - SBS/projects/gsp-gsn/data/scd_site_nasis_sf.rds")
 
 
 
@@ -498,7 +503,7 @@ test <- validate_depths(gsn_df, id = "pedon_key", top = "hzn_top", bot = "hzn_bo
 gsn_df2 <- gsn_df
 
 
-# bad O horizons
+# bad O horizons ----
 aggregate(total_carbon_ncs ~ grepl("O", hzn_desgn), data = gsn_df2, quantile, probs = seq(0, 1, 0.1))
 
 idx  <- with(gsn_df2, hzn_top > hzn_bot & (grepl("O", hzn_desgn) | (is.na(hzn_desgn) & total_carbon_ncs > 10)))
@@ -529,6 +534,9 @@ gsn_df2 <- rbind(h2_good_o, h2_bad_o_fixed)
 test2 <- validate_depths(gsn_df2, id = "pedon_key", top = "hzn_top", bot = "hzn_bot")
 # test2 <- aqp::checkHzDepthLogic(gsn_df2, hzdepths = c("hzn_top", "hzn_bot"), idname = "pedon_key", byhz = TRUE)
 
+summary(test)
+summary(test2)
+
 
 # # bad bottom depths
 # h2_bad_bot_dep_fixed <- gsn_df2 |>
@@ -546,10 +554,112 @@ test2 <- validate_depths(gsn_df2, id = "pedon_key", top = "hzn_top", bot = "hzn_
 # test3 <- aqp::checkHzDepthLogic(gsn_df3, hzdepths = c("hzn_top", "hzn_bot"), idname = "pedon_key", byhz = TRUE)
 
   
+gsn_df3 <- cbind(gsn_df2, test2[1:4 * -1])
   
-  
-  
+# save(gsn_df3, file = file.path(fp, "gsn_df3.RData"))
+load(file = file.path(fp, "gsn_df3.RData"))
+gsn_df3 <- gsn_df
 
+
+# check units ----
+gt0 <- function(x) x >= 0
+bt0and100 <- function(x) x >= 0 & x <= 100
+sum100 <- function(df) {
+  as.integer(round(rowSums(df, na.rm = TRUE))) == 100L
+  }
+
+vars100 <- c("clay_total", "sand_total", "silt_total", "total_carbon_ncs")
+vars <- c(vars100, "N_pt", "P_pt", "potassium_mehlich3_extractable", "cec_nh4_ph_7", "ph_h2o", "bulk_density_third_bar")
+
+
+summary(gsn_df3[vars])
+
+# gt0
+test_gt0 <- sapply(gsn_df3[vars], gt0)
+summary(test_gt0)
+View(cbind(gsn_df3["pedon_key"], test_gt0))
+
+# bt0and100
+test_bt0and100 <- sapply(gsn_df3[vars100], bt0and100)
+summary(test_bt0and100)
+test_bt0and100 <- sapply(gsn_df3[vars100], bt0and100)
+View(cbind(gsn_df3["pedon_key"], test_gt0))
+
+#sum100
+test_sum100 <- sum100(gsn_df3[vars100[1:3]])
+test0 <- gsn_df3[!test_sum100 & complete.cases(gsn_df3[vars100[1:3]]), ]
+summary(test_sum100)
+
+test <- gsn_df3[c("pedon_key", var100)] |>
+  within({
+  ssc_total = rowSums(cbind(clay_total, sand_total, silt_total))
+  check = as.integer(round(ssc_total)) == 100L
+}) |>
+  subset(complete.cases(cbind(clay_total, sand_total, silt_total)))
+
+
+
+# fix units ----
+# C, N, & P
+vars <- c("total_carbon_ncs", "N_pt", "P_pt")
+gsn_df3[vars] <- sapply(gsn_df3[vars], function(x) ifelse(x <= 0, 0, x))
+summary(gsn_df3[vars])
+
+gsn_df3$genhz <- aqp::generalize.hz(
+  gsn_df3$hzn_desgn,
+  new = c("O", "A", "BA|AB", "B", "C"),
+  pattern = c("O", "^A", "AB|BA", "^B|^IIB|2B^|^IIIB|3B^", "^C|^IIIC|^4C"),
+  ordered = TRUE
+  )
+aggregate(x = gsn_df3[vars], by = list(gsn_df3$genhz), FUN = function(x) format(summary(x), digits = 1))
+as.data.table(gsn_df3)[, lapply(.SD, function(x) quantile(x, probs = seq(0, 1, 0.1), na.rm = TRUE)), .SDcols = vars, by = "genhz"]
+
+
+
+# segment depths ----
+gsn_seg_df <- segment(gsn_df3, hzdepcols = c("hzn_top", "hzn_bot"), intervals = c(0, 30, 60, 100))
+gsn_seg_df <- gsn_seg_df |>
+  subset(valid_dep_all == TRUE) |>
+  transform(thk = hzn_bot - hzn_top)
+
+vars <- c("clay_total", "silt_total", "sand_total", "total_carbon_ncs", "bulk_density_third_bar", "ph_h2o", "N_pt", "P_pt", "potassium_water_extractable", "cec_nh4_ph_7")
+gsn_seg_df <- as.data.table(gsn_seg_df)[
+  , lapply(.SD, function(x) weighted.mean(x, w = thk)), 
+  .SDcols = vars, 
+  by = c("pedon_key", "segment_id")
+  ] |>
+  as.data.frame()
+
+# save(gsn_seg_df, file = file.path(fp, "gsn_seg_df.RData"))
+load(file = file.path(fp, "gsn_seg_df.RData"))
+
+test <- transform(gsn_seg_df, id = paste(pedon_key, segment_id))
+seg_lo <- reshape(
+  test, 
+  direction = "long",
+  idvar = "id",
+  timevar = "variable", times = vars,
+  v.names = "value", varying = vars
+  )
+
+
+ggplot(seg_lo, aes(x = value)) +
+  geom_density(fill = "grey", alpha = 0.5) +
+  facet_wrap(~ variable, scales = "free") +
+  ggtitle("Distribution of GSN 0-30cm soil properties")
+
+logit <- function(y) log(y / (100 - y))
+hist(logit(gsn_seg_df[gsn_seg_df$segment_id == "000-030", ]$clay_total))
+
+
+
+# transform skewed variables ----
+vars <- c("total_carbon_ncs", "N_pt", "P_pt", "potassium_water_extractable")
+nms <- paste0(vars, "_log")
+gsn_seg_df[nms] <- lapply(gsn_seg_df[vars], function(x) log(x + 0.01))
+
+# save(gsn_seg_df, file = file.path(fp, "gsn_seg_t_df.RData"))
+load(file = file.path(fp, "gsn_seg_t_df.RData"))
 
 
 
