@@ -16,7 +16,7 @@ lf <- c(lf, lf2)
 lf_ext <- sapply(lf, function(x) rast(x) |> ext() |> _[1:4]) |> t()
 lf_crs <- sapply(lf, function(x) rast(x) |> crs(proj = TRUE))
 lf <- cbind(fp = lf, ext = lf_ext, crs = lf_crs) |> data.frame(row.names = NULL)
-lf$fn <- gsub("\\./cov100/covariates/|\\.tif$", "", lf$fp)
+lf$fn <- gsub("\\./cov100/covariates/|\\./cov100/covariates/gSSURGO_filled/|\\.tif$", "", lf$fp)
 
 
 idx <- grepl("NAD83", lf$crs)
@@ -61,7 +61,9 @@ fun <- function(x) {
 #   crop(r, r2, filename = file.path(fp_cov100, "tiles", paste0(names(r), "_50.tif")), gdal="COMPRESS=NONE")
 # }
 
-future::plan(future::multisession, workers = 120)
+idx <- grepl("statsgo|mlra", lf$fn)
+
+future::plan(future::multisession, workers = 2)
 future.apply::future_lapply(lf$fp[idx], fun)
 
 
@@ -75,7 +77,7 @@ lf_tiles$tile <- strsplit(lf_tiles$fp, split = "_|.tif") |>
   as.integer()
 lf_tiles <- poorman::arrange(lf_tiles, tile)
 
-idx <- grepl("mlra52|PMTGSS7_f|DRNGSS7_f", lf_tiles)
+idx <- grepl("statsgo", lf_tiles$fp)
 # file.copy(file.path(fp_cov100, "tiles", lf_tiles$fp[idx]), "./tiles")
 
 
@@ -85,11 +87,11 @@ tiles <- list.files("./tiles", pattern = ".tif$", full.names = TRUE) |>
   cbind(fp = _) |>
   as.data.frame()
 tiles$tile <- tiles$fp |>
-  strsplit(split = "_|.tif") |>
+  strsplit(split = "_|.tif|_pmkind-ssurgo.tif$") |>
   sapply(function(x) x[length(x)]) |>
   as.integer()
 tiles$fn <- tiles$fp |>
-  strsplit(split= "\\./tiles/|_[0-9]{1,3}.tif$") |>
+  strsplit(split= "\\./tiles/|_[0-9]{1,3}.tif$|_[0-9]{1,3}_pmkind-ssurgo.tif$") |>
   sapply(function(x)  x[length(x)])
 tiles <- poorman::arrange(tiles, tile)
 
@@ -130,7 +132,8 @@ s2 <- s |>
 
 
 # extract ----
-tiles_l <- tiles |>
+idx <- grepl("statsgo_pmkind-ssurgo_100m", tiles$fn)
+tiles_l <- tiles[idx, ] |>
   subset(tile %in% s2$tile)
 tiles_l <- split(tiles_l, tiles_l$tile)
 
@@ -149,22 +152,25 @@ cbind(s2_l[[1]], test2) |> st_transform(crs = 4326) |> mapview::mapview()
 
 
 test2 <- mapply(extract_fun, tiles_l, s2_l, SIMPLIFY = FALSE)
-test3 <- mapply(cbind, s2_l, test2, SIMPLIFY = FALSE) |>
+test3 <- mapply(cbind, s2_l, test2, check.names = FALSE, SIMPLIFY = FALSE) |>
   do.call("rbind", args = _)
-names(test3)[names(test3) == "Layer_1"] <- "NLCD116"
+# names(test3)[names(test3) == "Layer_1"] <- "NLCD116"
 
-vars <- c("PVEGKT6", "DRNGSS7", "PMTGSS7", "NLCD116", "LNDCOV6", "COUNTY6", "GESUSG6")
-vars <- names(test3)[names(test3) %in% vars]
+vars <- c("PVEGKT6", "DRNGSS7", "PMTGSS7", "NLCD116", "LNDCOV6", "COUNTY6", "GESUSG6", "PMTGSS7_f", "DRNGSS7_f", "mlra52_aea_100m", "statsgo_pmkind-ssurgo_100m")
+vars <- vars[vars %in% names(test3)]
 
 test3[vars] <- lapply(vars, function(x) {
-  val <- rast(lf$fp[lf$fn == x]) |> unique() |> _[[1]]
-  x2  <- test3[[x]] |> factor(levels = val)
+  val <- rast(lf$fp[lf$fn == x]) |> 
+    unique() |> 
+    _[[1]]
+  x2  <- test3[[x]] |> 
+    factor(levels = val)
   return(x2)
 })
 
 
-# saveRDS(test3, file = "./data/scd_site_extract_sf.rds")
-test3 <- readRDS(file = "./data/scd_site_extract_sf.rds")
+# saveRDS(test4, file = "./data/scd_site_extract_sf.rds")
+test4 <- readRDS(file = "./data/scd_site_extract_sf.rds")
 
 
 

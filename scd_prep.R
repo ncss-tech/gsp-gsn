@@ -247,7 +247,7 @@ vars_phys <- nms_phys[
   & !grepl("disp", nms_phys)
   ]
 
-pat_chem <- c("total_nitrogen|^phosphorus_|^new_zealand_phos|^potassium_|^cec_nh4|ph_h2o|ph_cacl2|ph_kcl|total_carbon|organic_carbon|caco3_lt_2")
+pat_chem <- c("total_nitrogen|^phosphorus_|^new_zealand_phos|^potassium_|^cec_nh4|^k_nh4|ph_h2o|ph_cacl2|ph_kcl|total_carbon|organic_carbon|caco3_lt_2")
 nms_chem  <- names(scd_l$chemical_properties)
 vars_chem <- nms_chem[
   grepl(pat_chem, nms_chem) 
@@ -324,6 +324,8 @@ gsn_df <- within(gsn_df, {
     total_nitrogen_ncs
     )
   })
+gsn_df$N_pt_ppm <- gsn_df$N_pt * 10000
+
 
 # correlation
 with(gsn_df, cor(total_nitrogen_ncs, N_pt, use = "complete.obs"))
@@ -401,16 +403,74 @@ filter(gsn_df_P, phosphorus_mehlich_3 < 600) %>%
   geom_abline() +
   coord_fixed()
 
-meh_bray_lm <- lm(phosphorus_mehlich_3 ~ phosphorus_bray1, data = gsn_df)
 meh_meh_lm  <- lm(phosphorus_mehlich_3 ~ phosphorus_mehlich3_extractable, data = gsn_df)
+meh_bray_lm <- lm(phosphorus_bray1 ~ phosphorus_mehlich_3, data = gsn_df)
 summary(meh_bray_lm)
 summary(meh_meh_lm)
 
 gsn_df <- within(gsn_df, {
-  P_pt = phosphorus_mehlich_3
-  P_pt = ifelse(is.na(P_pt), predict(meh_bray_lm, data.frame(phosphorus_bray1)),                P_pt)
-  P_pt = ifelse(is.na(P_pt), predict(meh_meh_lm,  data.frame(phosphorus_mehlich3_extractable)), P_pt)
+  P_pt_ppm = phosphorus_mehlich_3
+  P_pt_ppm = ifelse(
+    is.na(P_pt_ppm), 
+    predict(meh_bray_lm, data.frame(phosphorus_mehlich_3)),
+    P_pt_ppm
+    )
+  P_pt_ppm = ifelse(
+    is.na(P_pt_ppm), 
+    predict(meh_meh_lm,  data.frame(phosphorus_mehlich3_extractable)), 
+    P_pt_ppm
+    )
   })
+
+
+
+## potassium ----
+source("C:/workspace2/github/ncss-tech/gsp-gsn/chemical-conversions.R")
+
+gsn_df$k_nh4_ph_7_ppm <- cmolkg_to_ppm(gsn_df$k_nh4_ph_7, 39.1, 1)
+
+
+nm  <- names(gsn_df)
+idx <- which(grepl("potassium|k_nh4|K_h2o", nm) & !grepl("method", nm))
+summary(gsn_df[idx])
+
+
+### subset non-missing data ----
+gsn_df[idx] > 0 ->.;
+# .[rowSums(., na.rm = TRUE) > 0, ] |>
+rowSums(., na.rm = TRUE) |> 
+  table()
+gsn_df_k <- gsn_df[rowSums(., na.rm = TRUE) > 0, c(1:3, idx)]
+
+gsn_df_k_layer <- merge(
+  scd_l$layer, 
+  gsn_df_K, 
+  by = "labsampnum", 
+  all.y = TRUE, 
+  sort = FALSE
+)
+gsn_df_k_layer <- as.data.table(gsn_df_k_layer)
+vars <- nm[idx]
+gsn_df_k_agg <- gsn_df_k_layer[, lapply(.SD, function(x) any(!is.na(x))), .SDcols = vars, by = "site_key"]
+
+
+summary(gsn_df_k_agg)
+
+
+gsn_df_k |>
+  group_by(meh = !is.na(potassium_mehlich3_extractable)) |>
+  summarize(
+    h2o  = sum(!is.na(potassium_water_extractable), na.rm = TRUE),
+    nh4  = sum(!is.na(k_nh4_ph_7), na.rm = TRUE)
+  )
+
+
+table(!is.na(gsn_df$k_nh4_ph_7_ppm), !is.na(gsn_df[c("potassium_mehlich3_extractable", "potassium_water_extractable")]))
+
+
+meh_NH4OAc_lm  <- lm(potassium_mehlich3_extractable ~ k_nh4_ph_7_ppm + ph_h2o, data = gsn_df)
+
+gsn_df$K_pt_ppm <- predict(meh_NH4OAc_lm, gsn_df)
 
 
 # saveRDS(gsn_df, file = file.path(fp, "gsn_df.rds"))
@@ -601,7 +661,7 @@ test <- gsn_df3[c("pedon_key", var100)] |>
 
 # fix units ----
 # C, N, & P
-vars <- c("total_carbon_ncs", "N_pt", "P_pt")
+vars <- c("total_carbon_ncs", "N_pt_ppm", "P_pt_ppm", "K_pt_ppm")
 gsn_df3[vars] <- sapply(gsn_df3[vars], function(x) ifelse(x <= 0, 0, x))
 summary(gsn_df3[vars])
 
@@ -622,7 +682,7 @@ gsn_seg_df <- gsn_seg_df |>
   subset(valid_dep_all == TRUE) |>
   transform(thk = hzn_bot - hzn_top)
 
-vars <- c("clay_total", "silt_total", "sand_total", "total_carbon_ncs", "bulk_density_third_bar", "ph_h2o", "N_pt", "P_pt", "potassium_water_extractable", "cec_nh4_ph_7")
+vars <- c("clay_total", "silt_total", "sand_total", "total_carbon_ncs", "bulk_density_third_bar", "ph_h2o", "N_pt_ppm", "P_pt_ppm", "K_pt_ppm", "cec_nh4_ph_7")
 gsn_seg_df <- as.data.table(gsn_seg_df)[
   , lapply(.SD, function(x) weighted.mean(x, w = thk)), 
   .SDcols = vars, 
@@ -654,7 +714,7 @@ hist(logit(gsn_seg_df[gsn_seg_df$segment_id == "000-030", ]$clay_total))
 
 
 # transform skewed variables ----
-vars <- c("total_carbon_ncs", "N_pt", "P_pt", "potassium_water_extractable")
+vars <- c("total_carbon_ncs", "N_pt_ppm", "P_pt_ppm", "K_pt_ppm")
 nms <- paste0(vars, "_log")
 gsn_seg_df[nms] <- lapply(gsn_seg_df[vars], function(x) log(x + 0.01))
 
