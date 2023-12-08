@@ -470,7 +470,14 @@ table(!is.na(gsn_df$k_nh4_ph_7_ppm), !is.na(gsn_df[c("potassium_mehlich3_extract
 
 meh_NH4OAc_lm  <- lm(potassium_mehlich3_extractable ~ k_nh4_ph_7_ppm + ph_h2o, data = gsn_df)
 
-gsn_df$K_pt_ppm <- predict(meh_NH4OAc_lm, gsn_df)
+gsn_df <- within(gsn_df, {
+  K_pt_ppm = potassium_mehlich3_extractable
+  K_pt_ppm = ifelse(
+    is.na(K_pt_ppm), 
+    predict(meh_NH4OAc_lm, data.frame(k_nh4_ph_7_ppm, ph_h2o)),
+    K_pt_ppm
+  )
+})
 
 
 # saveRDS(gsn_df, file = file.path(fp, "gsn_df.rds"))
