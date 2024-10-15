@@ -81,7 +81,7 @@ l_rat <- l_rat[l_rat %in% tiles_nona$l_rat]
 
 
 ## STATSGO ----
-fp_sta <- "D:/geodata/soils/wss_gsmsoil_US_[2016-10-13]"
+fp_sta <- "D:/geodata/soils/STATSGO2/wss_gsmsoil_US_[2016-10-13]"
 statsgo_sf <- read_sf(file.path(fp_sta, "US/spatial"), layer = "soilmu_a_us") |> 
   transform(MUKEY = as.integer(MUKEY)) |>
   st_transform(crs = crs(gnatsgo_r, proj = TRUE))
@@ -121,7 +121,7 @@ fp_nat <- file.path("D:/geodata/soils/gNATSGO_CONUS_Oct2023")
 gnatsgo_l_top <- list.files(path = fp_nat, pattern = "gnatsgo_[0-9]{1,3}_pmkind_top2.tif$", full = TRUE)
 gnatsgo_l_bot <- list.files(path = fp_nat, pattern = "gnatsgo_[0-9]{1,3}_pmkind_bot2.tif$")
 
-fp_sta <- "D:/geodata/soils/wss_gsmsoil_US_[2016-10-13]"
+fp_sta <- "D:/geodata/soils/STATSGO2/wss_gsmsoil_US_[2016-10-13]"
 statsgo_l <- list.files(path = fp_sta, pattern = "statsgo_[0-9]{1,3}.tif$", full = TRUE)
 
 
@@ -275,6 +275,7 @@ dcon_pmkind_all <- mu["mukey"] |>
   merge(dcon_pmkind_bot, by = "mukey", all.x = TRUE) |>
   as.data.frame()
 # saveRDS(dcon_pmkind_all, file.path(fp_nat, "dcon_pmkind.rds"))
+dcon_pmkind_all <- readRDS(file.path(fp_nat, "dcon_pmkind.rds"))
 
 
 
@@ -323,7 +324,7 @@ merge(test, filename = fn, datatype = "INT1U", overwrite = TRUE)
 
 
 ## statsgo pmkind ----
-fp_sta <- "D:/geodata/soils/wss_gsmsoil_US_[2016-10-13]"
+fp_sta <- "D:/geodata/soils/STATSGO2/wss_gsmsoil_US_[2016-10-13]"
 statsgo_l <- list.files(path = fp_sta, pattern = "statsgo_[0-9]{1,3}.tif$", full = TRUE)
 
 pmkind_lookup <- readRDS(file = file.path(fp_sta, "pmkind_top2_lookup.rds"))
@@ -350,6 +351,39 @@ test <- sprc(l2)
 fn <- file.path(fp_sta, "statsgo_pmkind_top.tif")
 merge(test, filename = fn, datatype = "INT1U", overwrite = TRUE)
 
+
+
+# merge, resample, crop ----
+ex <- rast("D:/geodata/project_data/ADIUCL5.tif")
+
+gnatsgo_pmkind_top <- file.path(fp_nat, "gnatsgo_Oct22_pmkind_top.tif") |> rast()
+gnatsgo_pmkind_bot <- file.path(fp_nat, "gnatsgo_Oct22_pmkind_bot.tif") |> rast()
+
+statsgo_pmkind_top <- file.path(fp_sta, "statsgo_pmkind_top.tif") |> rast()
+statsgo_pmkind_bot <- file.path(fp_sta, "statsgo_pmkind_bot.tif") |> rast()
+
+
+# top
+crs(statsgo_pmkind_top) <- crs(ex)
+statsgo_pmkind_top <- statsgo_pmkind_top |>
+  merge(gnatsgo_pmkind_top, first = TRUE) |>
+  resample(ex, method = "mode") |>
+  crop(ex, filename = file.path(fp_sta, "statsgo_pmkind_top_100m_crop.tif"))
+
+
+# bot
+crs(statsgo_pmkind_bot) <- crs(ex)
+statsgo_pmkind_bot <- statsgo_pmkind_bot |>
+  merge(gnatsgo_pmkind_bot, first = TRUE) |>
+  resample(ex, method = "mode") |>
+  crop(ex, filename = file.path(fp_sta, "statsgo_pmkind_bot_100m_crop.tif"))
+
+
+# look table
+table(dcon_pmkind_all$pmkind_top2) |> 
+  as.data.frame() |> 
+  cbind(id = 1:13) |> 
+  write.csv(x = _, file.path(fp_sta, "statsgo_pmkind_lookup.csv"), row.names = FALSE)
 
 
 
